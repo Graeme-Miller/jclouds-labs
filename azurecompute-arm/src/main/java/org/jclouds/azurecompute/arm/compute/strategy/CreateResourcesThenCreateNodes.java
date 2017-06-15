@@ -81,6 +81,9 @@ public class CreateResourcesThenCreateNodes extends CreateNodesWithGroupEncodedI
    private final String defaultVnetAddressPrefix;
    private final String defaultSubnetAddressPrefix;
    private final TemplateToAvailabilitySet templateToAvailabilitySet;
+   private final String DEFAULT_NETWORK_NAME = "jclouds-default-network";
+   private final String DEFAULT_SUBNET_NAME = "jclouds-default-subnet";
+   private final String DEFAULT_RESOURCE_GROUP = "jclouds-default-resource-group";
 
    @Inject
    protected CreateResourcesThenCreateNodes(
@@ -119,7 +122,11 @@ public class CreateResourcesThenCreateNodes extends CreateNodesWithGroupEncodedI
 
       String location = template.getLocation().getId();
 
-      createResourceGroupIfNeeded(group, location, options);
+      //If no group, base on group id
+      if (options.getResourceGroup() == null) {
+         options.resourceGroup(group);
+      }
+      createResourceGroupIfNeeded(options.getResourceGroup(), location);
       
       normalizeNetworkOptions(options);
       createDefaultNetworkIfNeeded(group, location, options);
@@ -132,21 +139,25 @@ public class CreateResourcesThenCreateNodes extends CreateNodesWithGroupEncodedI
 
    protected synchronized void createDefaultNetworkIfNeeded(String group, String location, AzureTemplateOptions options) {
       if (options.getIpOptions().isEmpty()) {
-         String name = namingConvention.create().sharedNameForGroup(group);
-         
-         Subnet subnet = Subnet.builder().name(name)
-               .properties(SubnetProperties.builder().addressPrefix(defaultSubnetAddressPrefix).build()).build();
-         
+         String resourceGroupName = DEFAULT_RESOURCE_GROUP  + "-" + location;
+         String vnetName = DEFAULT_NETWORK_NAME + "-" + location;
+         String subnetName = DEFAULT_SUBNET_NAME + "-" + location;
+
+         createResourceGroupIfNeeded(resourceGroupName, location);
+
+         Subnet subnet = Subnet.builder().name(subnetName)
+                 .properties(SubnetProperties.builder().addressPrefix(defaultSubnetAddressPrefix).build()).build();
+
          VirtualNetworkProperties properties = VirtualNetworkProperties.builder()
-               .addressSpace(AddressSpace.create(Arrays.asList(defaultVnetAddressPrefix)))
-               .subnets(Arrays.asList(subnet)).build();
-         
-         logger.debug(">> network options have not been configured. Creating network %s(%s) and subnet %s(%s)", name,
-               defaultVnetAddressPrefix, name, defaultSubnetAddressPrefix);
-         
-         api.getVirtualNetworkApi(options.getResourceGroup()).createOrUpdate(name, location, properties);
-         Subnet createdSubnet = api.getSubnetApi(options.getResourceGroup(), name).get(name);
-         
+                 .addressSpace(AddressSpace.create(Arrays.asList(defaultVnetAddressPrefix)))
+                 .subnets(Arrays.asList(subnet)).build();
+
+         logger.debug(">> network options have not been configured. Creating network %s(%s) and subnet %s(%s)", vnetName,
+                 defaultVnetAddressPrefix, subnetName, defaultSubnetAddressPrefix);
+
+         api.getVirtualNetworkApi(resourceGroupName).createOrUpdate(vnetName, location, properties);
+         Subnet createdSubnet = api.getSubnetApi(resourceGroupName, vnetName).get(subnetName);
+
          options.ipOptions(IpOptions.builder().subnet(createdSubnet.id()).allocateNewPublicIp(true).build());
       }
    }
@@ -185,15 +196,13 @@ public class CreateResourcesThenCreateNodes extends CreateNodesWithGroupEncodedI
       }
    }
    
-   private void createResourceGroupIfNeeded(String group, String location, AzureTemplateOptions options) {
-      if (options.getResourceGroup() == null) {
-         options.resourceGroup(group);
-      }
-      logger.debug(">> using resource group [%s]", options.getResourceGroup());
-      ResourceGroup rg = api.getResourceGroupApi().get(options.getResourceGroup());
+   private void createResourceGroupIfNeeded(String resourceGroup, String location) {
+
+      logger.debug(">> using resource group [%s]", resourceGroup);
+      ResourceGroup rg = api.getResourceGroupApi().get(resourceGroup);
       if (rg == null) {
-         logger.debug(">> resource group [%s] does not exist. Creating!", options.getResourceGroup());
-         api.getResourceGroupApi().create(options.getResourceGroup(), location,
+         logger.debug(">> resource group [%s] does not exist. Creating!", resourceGroup);
+         api.getResourceGroupApi().create(resourceGroup, location,
                ImmutableMap.of("description", "jclouds default resource group"));
       }
    }
